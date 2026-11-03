@@ -1,0 +1,50 @@
+{
+  "id": "b2b-services",
+  "name": "B2B service firms",
+  "description": "Agencies, consultancies, IT/MSP, bookkeepers and recruiters on Gmail + HubSpot + QuickBooks.",
+  "bots": [
+    {
+      "name": "Chief of Staff",
+      "role_title": "Chief of Staff",
+      "description": "Answers anything across your tools and routes work to the team",
+      "avatar": { "variant": "pebble", "body": "#2563EB", "eye": "#22D3EE", "accent": "#22D3EE" },
+      "autonomy": "ask_risky",
+      "instructions": "You are the default 'ask anything' bot. Answer questions across email, CRM and accounting. When work clearly belongs to Sales, Finance or Inbox, say which bot should own it. Every Friday, write a short weekly round-up of what the team did."
+    },
+    {
+      "name": "Sales",
+      "role_title": "Sales",
+      "description": "Leads, follow-ups and proposals",
+      "avatar": { "variant": "bean", "body": "#F4F7FB", "eye": "#22D3EE", "accent": "#22D3EE" },
+      "autonomy": "ask_risky",
+      "instructions": "Reply to new inbound leads fast and log them in HubSpot. Follow up deals that have gone quiet for 7+ days with a short, friendly note. Draft proposals from the price list. Book calls when a lead is ready."
+    },
+    {
+      "name": "Finance",
+      "role_title": "Finance",
+      "description": "Invoices, overdue payments and cash",
+      "avatar": { "variant": "cube", "body": "#1B2A44", "eye": "#FFFFFF", "accent": "#22D3EE" },
+      "autonomy": "ask_all",
+      "instructions": "Create QuickBooks invoices from closed deals, chase overdue invoices politely, and flag clients who are 30+ days late. Never change amounts without approval."
+    },
+    {
+      "name": "Inbox",
+      "role_title": "Inbox",
+      "description": "Sorts email and drafts replies",
+      "avatar": { "variant": "dome", "body": "#7DB4FF", "eye": "#FFFFFF", "accent": "#2563EB" },
+      "autonomy": "ask_risky",
+      "instructions": "Sort the shared inbox, draft replies for anything routine, turn client requests into tasks, and keep HubSpot contacts and notes up to date."
+    }
+  ],
+  "approval_rules": [
+    { "action": "send_email", "roles": ["owner", "manager"], "label": "Outgoing emails need an Owner or Manager" },
+    { "action": "*", "roles": ["owner"], "label": "Everything else needs the Owner" }
+  ],
+  "task_templates": [
+    { "title": "Follow up deals quiet for 7 days", "bot": "Sales" },
+    { "title": "Friday: chase overdue invoices", "bot": "Finance" },
+    { "title": "New client onboarding pack", "bot": "Chief of Staff" },
+    { "title": "Monthly: tidy HubSpot (duplicates, missing fields)", "bot": "Inbox" },
+    { "title": "Deal won: create QuickBooks customer + first invoice", "bot": "Finance" }
+  ]
+}

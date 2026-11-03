@@ -1,0 +1,60 @@
+{
+  "name": "kenjiflow-staff",
+  "productName": "KenjiFlow Staff",
+  "version": "0.1.0",
+  "description": "KenjiFlow Staff: AI bots for small businesses. Windows app + always-on engine.",
+  "main": "desktop/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "engine": "node engine/server.js",
+    "dev": "node engine/server.js --serve-ui",
+    "test": "node --test \"test/*.test.mjs\"",
+    "dist": "electron-builder --win",
+    "dist:dir": "electron-builder --win --dir"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.4.0",
+    "@composio/core": "^0.27.0",
+    "@electric-sql/pglite": "^0.5.14",
+    "@honcho-ai/sdk": "^2.8.0",
+    "pg": "^8.23.1",
+    "ws": "^8.22.1"
+  },
+  "devDependencies": {
+    "electron": "^44.8.0",
+    "electron-builder": "^26.15.3"
+  },
+  "author": "KenjiFlow",
+  "build": {
+    "appId": "com.kenjiflow.staff",
+    "productName": "KenjiFlow Staff",
+    "copyright": "Copyright (c) KenjiFlow",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "desktop/**/*",
+      "engine/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "KenjiFlow Staff",
+      "artifactName": "KenjiFlow-Staff-Setup-${version}.exe"
+    }
+  }
+}
