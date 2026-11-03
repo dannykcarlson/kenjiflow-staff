@@ -1,0 +1,49 @@
+# One client's company server: the engine, its Postgres database and Caddy for HTTPS.
+# Setup steps are in app/README.md under "Company server".
+services:
+  engine:
+    build: ..
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://kenjiflow:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@db:5432/kenjiflow
+      KF_PUBLIC_URL: https://${KF_DOMAIN:?set KF_DOMAIN in deploy/.env}
+    volumes:
+      - engine-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kenjiflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: kenjiflow
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kenjiflow -d kenjiflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      KF_DOMAIN: ${KF_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - engine
+
+volumes:
+  engine-data:
+  db-data:
+  caddy-data:

@@ -134,3 +134,31 @@ test('turning a trigger off or pausing bots skips events', async () => {
   await api('POST', '/api/kill-switch', { paused: false });
   assert.equal((await api('POST', `/api/triggers/${trg.id}/run`)).outcome, 'handed to bot');
 });
+
+test('bots set up, change and remove recurring tasks from chat', async () => {
+  const { runTool } = require('../engine/tools.js');
+  const { bots } = await api('GET', '/api/bootstrap');
+  const sales = await engine.store.getBot(bots.find((b) => b.name === 'Sales').id);
+  const ctx = { store: engine.store, bot: sales, user: null, triggers: engine.triggers, connected: { apps: true } };
+
+  const neither = await runTool('set_up_recurring', { name: 'Pipeline report', instructions: 'Summarize the pipeline' }, ctx).catch((e) => ({ error: e.message }));
+  assert.match(neither.error, /either a schedule or an app_event/);
+
+  const made = await runTool('set_up_recurring', { name: 'Pipeline report', instructions: 'Summarize open deals for the owner', schedule: { freq: 'weekly', day: 1, time: '09:00' } }, ctx);
+  assert.equal(made.result.when, 'Mondays at 09:00');
+  const row = (await api('GET', '/api/triggers')).find((t) => t.id === made.result.recurring_id);
+  assert.equal(row.bot_id, sales.id);
+  assert.equal(row.created_by, null, 'made by the bot, not a person');
+
+  const listed = await runTool('list_recurring', {}, ctx);
+  assert.ok(listed.result.recurring.some((t) => t.id === made.result.recurring_id));
+
+  const paused = await runTool('change_recurring', { recurring_id: made.result.recurring_id, on: false, schedule: { freq: 'weekdays', time: '08:00' } }, ctx);
+  assert.equal(paused.result.on, false);
+  assert.equal(paused.result.when, 'Weekdays at 08:00');
+
+  await runTool('remove_recurring', { recurring_id: made.result.recurring_id }, ctx);
+  assert.ok(!(await api('GET', '/api/triggers')).some((t) => t.id === made.result.recurring_id));
+  const feed = await api('GET', '/api/feed');
+  assert.ok(feed.some((f) => f.summary === 'New recurring task: Pipeline report (Mondays at 09:00)'));
+});

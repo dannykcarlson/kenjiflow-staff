@@ -1,0 +1,6 @@
+# HTTPS for the company server. Caddy gets and renews the certificate on its own;
+# KF_DOMAIN must already point at this server's IP address.
+{$KF_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy engine:4310
+}

@@ -9,6 +9,10 @@ async function seedIfEmpty(store, db) {
   const existing = await db.one('SELECT COUNT(*)::int AS n FROM users');
   if (existing.n > 0) return false;
 
+  // A server on the internet must never start with the demo password.
+  if (process.env.NODE_ENV === 'production' && !(process.env.KF_OWNER_EMAIL && process.env.KF_OWNER_PASSWORD && process.env.KF_OWNER_PASSWORD.length >= 12)) {
+    throw new Error('First start on a server: set KF_OWNER_EMAIL and KF_OWNER_PASSWORD (12+ characters) for the Owner login.');
+  }
   const password = process.env.KF_OWNER_PASSWORD || 'kenjiflow-demo';
   await store.createUser({
     email: process.env.KF_OWNER_EMAIL || 'owner@northwind.test',

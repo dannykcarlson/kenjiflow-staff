@@ -1,0 +1,12 @@
+{
+  "name": "KenjiFlow Staff approvals",
+  "short_name": "KenjiFlow",
+  "start_url": "/m/",
+  "scope": "/m/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#2563EB",
+  "icons": [
+    { "src": "/assets/kenjiflow-mark-color.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

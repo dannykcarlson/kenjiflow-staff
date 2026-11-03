@@ -7,6 +7,7 @@ const MAX_STEPS = 10;
 
 function createRuntime({ store, llm, connectors, gmail, composio, memory }) {
   const queues = new Map();
+  let triggers = null; // set by attachTriggers: triggers are built after the runtime, since they call it
 
   function enqueue(botId, job) {
     const prev = queues.get(botId) || Promise.resolve();
@@ -26,7 +27,8 @@ function createRuntime({ store, llm, connectors, gmail, composio, memory }) {
       bot.instructions ? `Your instructions:\n${bot.instructions}` : '',
       `How you work:
 - If the person asks a question or wants information, answer it directly in chat. Do not create a task.
-- If they ask you to DO something (an action with an outcome), call create_task first, then do the work, logging progress with update_task and finishing with status "done".
+- If they ask you to DO something (an action with an outcome), call create_task first, then do the work, logging progress with update_task and finishing with status "review" so a person can check it.
+- If the work should repeat ("every Monday", "each morning", "whenever a new lead emails"), set it up with set_up_recurring instead of doing it once. If a one-off request is clearly routine, do it and offer to make it recurring.
 - Anything that leaves the business (emails, record changes) goes through your tools; some need human approval. When a tool says an action is waiting for approval, stop and tell the person, and don't repeat the action.
 - If you need information only a person can give, call ask_for_feedback and stop.
 - Save substantial documents with create_artifact. Keep chat replies short and plain.
@@ -96,7 +98,7 @@ function createRuntime({ store, llm, connectors, gmail, composio, memory }) {
 
     await store.updateBot(botId, { status_text: 'Thinking…' });
     const connected = { gmail: !!gmailConn, apps: apps.length > 0 };
-    const ctx = { store, bot, user, taskId, connectors, gmail, composio, connected, source, describeTask };
+    const ctx = { store, bot, user, taskId, connectors, gmail, composio, triggers, connected, source, describeTask };
     const system = await systemPrompt(bot);
     const tools = toolDefinitions();
     const replies = [];
@@ -177,7 +179,9 @@ function createRuntime({ store, llm, connectors, gmail, composio, memory }) {
     }
   }
 
-  return { send, refreshStatus, describeTask };
+  function attachTriggers(t) { triggers = t; }
+
+  return { send, refreshStatus, describeTask, attachTriggers };
 }
 
 function connectedLine(gmailConn, apps) {

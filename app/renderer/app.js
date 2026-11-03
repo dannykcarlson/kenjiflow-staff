@@ -7,7 +7,6 @@ import * as chat from './views/chat.js';
 import * as tasks from './views/tasks.js';
 import * as feed from './views/feed.js';
 import * as library from './views/library.js';
-import * as triggers from './views/triggers.js';
 import { openBotEditor } from './views/bot-editor.js';
 import { openSettings, onSettingsEvent } from './views/settings.js';
 
@@ -17,7 +16,7 @@ export const state = {
   route: { view: 'chat', botId: null },
 };
 
-const VIEWS = { chat, tasks, feed, library, triggers };
+const VIEWS = { chat, tasks, feed, library };
 let stopLive = null;
 
 // ---------- per-viewer preferences: theme and sidebar ----------
@@ -155,7 +154,6 @@ function renderSidebar() {
     ${state.paused ? `<div class="paused-banner">${collapsed ? 'Paused' : 'All bots paused'}</div>` : ''}
     <nav class="nav">
       <button class="nav-item ${r.view === 'tasks' ? 'active' : ''}" data-go="tasks"${tip('Tasks')}>${icon.tasks}<span>Tasks</span>${needsYou ? `<b class="badge badge-warning">${needsYou}</b>` : ''}</button>
-      <button class="nav-item ${r.view === 'triggers' ? 'active' : ''}" data-go="triggers"${tip('Triggers')}>${icon.bolt}<span>Triggers</span>${state.triggers.some((t) => t.last_error) ? '<b class="badge badge-warning">!</b>' : ''}</button>
       <button class="nav-item ${r.view === 'feed' ? 'active' : ''}" data-go="feed"${tip('Information Feed')}>${icon.feed}<span>Information Feed</span>${unread ? `<b class="badge badge-tint">${unread}</b>` : ''}</button>
       <button class="nav-item ${r.view === 'library' ? 'active' : ''}" data-go="library"${tip('Files & Artifacts')}>${icon.files}<span>Files &amp; Artifacts</span></button>
     </nav>

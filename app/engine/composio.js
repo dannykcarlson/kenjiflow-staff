@@ -82,6 +82,7 @@ function createComposio({ store, secrets, clientFactory }) {
     let error = null;
     if (enabled) {
       try { conns = await connections({ fresh: true }); } catch (err) { error = err.message; }
+      if (!error) warmAuthConfigs().catch(() => { /* Connect looks it up itself */ });
     }
     const custom = await store.getSetting('composio_extra_apps', []);
     const apps = [...APP_CATALOG, ...custom.filter((s) => !APP_CATALOG.some((a) => a.slug === s)).map((s) => ({ slug: s, name: s }))]
@@ -112,32 +113,54 @@ function createComposio({ store, secrets, clientFactory }) {
 
   // The project's login setup for an app: the one already there, else Composio's own
   // (Composio-managed OAuth). Apps without a Composio-managed login need one made in the dashboard.
+  // IDs are remembered per key, so Connect costs one Composio call instead of three.
+  let authConfigIds = { key: null, map: {} };
   async function authConfigFor(c, toolkit) {
+    if (authConfigIds.key !== clientKey) authConfigIds = { key: clientKey, map: {} };
+    if (authConfigIds.map[toolkit]) return authConfigIds.map[toolkit];
     const found = (await c.authConfigs.list({ toolkit })).items || [];
-    if (found[0]) return found[0].id;
-    try {
-      return (await c.authConfigs.create(toolkit, { type: 'use_composio_managed_auth', name: `${appName(toolkit)} (KenjiFlow)` })).id;
-    } catch (err) {
-      throw httpError(409, `${appName(toolkit)} needs a login setup in Composio first (dashboard > Auth configs > ${appName(toolkit)}). ${err.message}`);
+    let id = found[0] && found[0].id;
+    if (!id) {
+      try {
+        id = (await c.authConfigs.create(toolkit, { type: 'use_composio_managed_auth', name: `${appName(toolkit)} (KenjiFlow)` })).id;
+      } catch (err) {
+        throw httpError(409, `${appName(toolkit)} needs a login setup in Composio first (dashboard > Auth configs > ${appName(toolkit)}). ${err.message}`);
+      }
     }
+    authConfigIds.map[toolkit] = id;
+    return id;
+  }
+
+  // Looks up every app's login setup in one call while Settings is open, before anyone clicks.
+  async function warmAuthConfigs() {
+    const c = await getClient();
+    if (authConfigIds.key === clientKey && Object.keys(authConfigIds.map).length) return;
+    const res = await c.authConfigs.list({});
+    const map = {};
+    for (const a of res.items || []) {
+      const slug = a.toolkit && a.toolkit.slug;
+      if (slug && !map[slug]) map[slug] = a.id;
+    }
+    authConfigIds = { key: clientKey, map };
   }
 
   // Returns a sign-in link for the app. When the person finishes, Composio marks the
   // connection ACTIVE; we wait in the background and tell the apps.
   async function connect(toolkit, user) {
     const c = await getClient();
-    const req = await c.connectedAccounts.link(await userId(), await authConfigFor(c, toolkit), { allowMultiple: true });
-    if (!req || !req.redirectUrl) throw httpError(502, 'Composio did not return a sign-in link');
+    // The raw link call: the SDK's link() first lists existing accounts, which only adds a round trip.
+    const req = await c.client.link.create({ auth_config_id: await authConfigFor(c, toolkit), user_id: await userId() });
+    if (!req || !req.redirect_url) throw httpError(502, 'Composio did not return a sign-in link');
     store.audit('user', user.id, 'connector.app.connect_started', { toolkit });
-    if (req.id) {
-      c.connectedAccounts.waitForConnection(req.id, 10 * 60 * 1000).then(async () => {
+    if (req.connected_account_id) {
+      c.connectedAccounts.waitForConnection(req.connected_account_id, 10 * 60 * 1000).then(async () => {
         toolkitsCache = { at: 0, list: [] };
         await store.audit('user', user.id, 'connector.app.connected', { toolkit });
         await store.postFeed({ kind: 'connector', importance: 'important', summary: `${appName(toolkit)} connected` });
         store.emit('settings', { key: 'composio_connections', value: { toolkit, status: 'ACTIVE' } });
       }).catch(() => { /* person closed the tab or it timed out */ });
     }
-    return req.redirectUrl;
+    return req.redirect_url;
   }
 
   async function disconnect(toolkit, user) {

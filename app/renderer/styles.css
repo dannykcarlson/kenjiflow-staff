@@ -175,6 +175,9 @@ code { font-family: var(--font-mono); font-size: 12px; background: var(--surface
 .btn-ghost:hover { background: var(--surface-200); border-color: transparent; }
 .btn-on { background: var(--brand-tint); border-color: var(--primary); color: var(--brand-tint-ink); }
 .btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
+.spinner { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -2px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.btn:disabled:has(.spinner) { opacity: .75; }
 .btn-block { width: 100%; justify-content: center; height: 40px; }
 .danger-text { color: var(--danger); }
 .link { color: var(--link); font-weight: 500; }
@@ -241,6 +244,7 @@ legend { font-size: 12px; font-weight: 600; color: var(--ink-muted); padding: 0;
 .login-faces { display: flex; justify-content: center; align-items: flex-end; gap: 4px; margin-bottom: -4px; }
 .login-logo { height: 28px; align-self: center; }
 .login-card h1 { font-size: 20px; text-align: center; margin-bottom: 4px; }
+.login-server { text-align: center; }
 
 /* ---------- chat ---------- */
 .chat { display: flex; flex-direction: column; height: 100%; min-height: 0; position: relative; }
@@ -464,6 +468,7 @@ details.advanced[open] > :not(summary) { margin-top: 10px; }
 .template { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border: 1px dashed var(--border-control); border-radius: var(--radius-md); text-align: left; }
 .template:hover { background: var(--surface-200); border-style: solid; }
 .template > span { display: flex; flex-direction: column; }
+.recurring-hint { margin: 0 0 14px; }
 .trigger-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-lg); }
 .trigger-row { display: flex; gap: 14px; align-items: flex-start; padding: 14px 16px; border-top: 1px solid var(--border); }
 .trigger-row:first-child { border-top: 0; }
@@ -522,3 +527,7 @@ details.advanced[open] > :not(summary) { margin-top: 10px; }
 .panel-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 @media (max-width: 1100px) { .bot-panel { width: 260px; } }
 @media (max-width: 900px) { .bot-panel { display: none; } }
+.audit { display: flex; flex-direction: column; max-height: 60vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.audit-row { display: grid; grid-template-columns: 170px 1fr; gap: 2px 12px; padding: 8px 12px; border-top: 1px solid var(--border); font-size: 13px; }
+.audit-row:first-child { border-top: 0; }
+.audit-row > .small { grid-column: 2; }

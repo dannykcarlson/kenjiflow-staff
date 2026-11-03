@@ -14,18 +14,20 @@ const { createGmail } = require('./gmail');
 const { createConnectors } = require('./connectors');
 const { createComposio } = require('./composio');
 const { createMemory } = require('./memory');
-const { createTriggers } = require('./triggers');
+const { createTriggers, cleanTrigger } = require('./triggers');
+const { createPush } = require('./push');
+const { version: VERSION } = require('../package.json');
 
 // Engine settings can live in app/.env (ANTHROPIC_API_KEY=..., PORT=..., etc.).
 try { process.loadEnvFile(path.join(__dirname, '..', '.env')); } catch { /* no .env: fine */ }
 
 const UI_ROOT = path.join(__dirname, '..', 'renderer');
 const MAX_UPLOAD = 25 * 1024 * 1024;
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json' };
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const ROLES = ['owner', 'manager', 'staff', 'admin'];
 
-async function start({ port = Number(process.env.PORT) || 4310, host = process.env.HOST || '127.0.0.1', dataDir, serveUi = false, llm, composioFactory, memoryClientFactory } = {}) {
+async function start({ port = Number(process.env.PORT) || 4310, host = process.env.HOST || '127.0.0.1', dataDir, serveUi = false, llm, composioFactory, memoryClientFactory, pushSender } = {}) {
   dataDir = dataDir || process.env.KF_DATA_DIR || path.join(__dirname, '..', 'data');
   const db = await openDb({ dataDir, databaseUrl: process.env.DATABASE_URL });
   const store = createStore(db, { filesDir: path.join(dataDir, 'files') });
@@ -43,6 +45,10 @@ async function start({ port = Number(process.env.PORT) || 4310, host = process.e
   const memory = createMemory({ store, clientFactory: memoryClientFactory });
   const runtime = createRuntime({ store, llm, connectors, gmail, composio, memory });
   const triggers = createTriggers({ db, store, runtime, composio });
+  runtime.attachTriggers(triggers);
+  const push = createPush({ db, store, secrets, sender: pushSender });
+  push.start();
+  const startedAt = Date.now();
   const llmInfo = () => ({ provider: llm.provider, model: llm.model, key_source: llm.keySource });
 
   const routes = [];
@@ -52,10 +58,27 @@ async function start({ port = Number(process.env.PORT) || 4310, host = process.e
     routes.push({ method, re, keys, handler, opts });
   };
 
+  // ---------- health (for uptime checks on the client's server) ----------
+  route('GET', '/api/health', async () => ({ ok: true, version: VERSION, ai: llm.provider === 'mock' ? 'demo' : 'claude', paused: !!(await store.getSetting('paused', false)), uptime_s: Math.round((Date.now() - startedAt) / 1000) }), { public: true });
+
   // ---------- auth ----------
-  route('POST', '/api/login', async ({ body }) => {
+  // The engine can face the internet, so repeated wrong passwords from one address are slowed down.
+  const failures = new Map(); // ip -> { n, until }
+  route('POST', '/api/login', async ({ req, body }) => {
+    // Behind the HTTPS proxy (KF_TRUST_PROXY=1) the caller's address is in X-Forwarded-For.
+    const fwd = process.env.KF_TRUST_PROXY === '1' && String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    const ip = fwd || req.socket.remoteAddress || '?';
+    const f = failures.get(ip);
+    if (f && f.n >= 10 && Date.now() < f.until) throw httpError(429, 'Too many wrong passwords. Try again in 15 minutes.');
     const res = await store.login(body.email, body.password);
-    if (!res) throw httpError(401, 'Wrong email or password');
+    if (!res) {
+      const next = { n: f && Date.now() < f.until ? f.n + 1 : 1, until: Date.now() + 15 * 60 * 1000 };
+      failures.set(ip, next);
+      if (failures.size > 5000) failures.delete(failures.keys().next().value);
+      throw httpError(401, 'Wrong email or password');
+    }
+    failures.delete(ip);
+    await store.audit('user', res.user.id, 'login', { ip });
     return res;
   }, { public: true });
   route('POST', '/api/logout', async ({ token }) => { await store.logout(token); return { ok: true }; });
@@ -401,6 +424,27 @@ async function start({ port = Number(process.env.PORT) || 4310, host = process.e
     return { outcome: await triggers.runNow(params.id, user) };
   });
 
+  // ---------- phone notifications ----------
+  route('GET', '/api/push/key', async () => ({ key: await push.publicKey() }));
+  route('POST', '/api/push/subscribe', async ({ user, body }) => { await push.subscribe(user, body.subscription, body.label); return { ok: true }; });
+  route('DELETE', '/api/push/subscribe', async ({ user, query }) => { await push.unsubscribe(user, query.endpoint); return { ok: true }; });
+  route('GET', '/api/push/devices', async ({ user }) => push.devices(user));
+  route('POST', '/api/push/test', async ({ user }) => ({ sent: await push.notify((u) => u.id === user.id, { title: 'KenjiFlow Staff', body: 'Notifications are on. Approvals will show up here.', url: '/m/' }) }));
+
+  // ---------- activity log ----------
+  route('GET', '/api/audit', async ({ user, query }) => {
+    requireRole(user, ['owner', 'admin']);
+    const limit = Math.min(200, Math.max(1, Number(query.limit) || 100));
+    const before = query.before ? new Date(query.before) : new Date(Date.now() + 1000);
+    if (Number.isNaN(before.getTime())) throw httpError(400, 'Bad date');
+    return db.all(`SELECT a.id, a.actor_type, a.actor_id, a.action, a.detail, a.created_at,
+        COALESCE(u.name, b.name) AS actor_name
+      FROM audit_log a
+      LEFT JOIN users u ON a.actor_type = 'user' AND u.id = a.actor_id
+      LEFT JOIN bots b ON a.actor_type = 'bot' AND b.id = a.actor_id
+      WHERE a.created_at < $1 ORDER BY a.created_at DESC LIMIT $2`, [before.toISOString(), limit]);
+  });
+
   // ---------- feed ----------
   route('GET', '/api/feed', async ({ user, query }) => store.listFeed(user, { botId: query.bot, importance: query.importance, unread: query.unread === '1' }));
   route('POST', '/api/feed/read-all', async ({ user }) => { await store.markAllFeedRead(user); return { ok: true }; });
@@ -492,7 +536,8 @@ async function start({ port = Number(process.env.PORT) || 4310, host = process.e
 
     const url = new URL(req.url, 'http://x');
     if (!url.pathname.startsWith('/api/')) {
-      if (serveUi) return serveStatic(url.pathname, res);
+      // The phone page is always served: it's how people approve from anywhere.
+      if (serveUi || url.pathname === '/m' || url.pathname.startsWith('/m/') || url.pathname.startsWith('/assets/')) return serveStatic(url.pathname === '/m' ? '/m/' : url.pathname, res);
       res.writeHead(404); return res.end();
     }
 
@@ -536,13 +581,13 @@ async function start({ port = Number(process.env.PORT) || 4310, host = process.e
   if (!publicUrl) publicUrl = `http://localhost:${server.address().port}`;
   console.log(`KenjiFlow Staff engine on ${address} (AI: ${llm.provider}${llm.provider === 'mock' ? ', demo mode' : `, ${llm.model}`}; memory: ${memory.enabled ? 'Honcho' : 'off'})`);
   return {
-    url: address, store, runtime, db, triggers,
+    url: address, store, runtime, db, triggers, push,
     async close() { triggers.stop(); wss.close(); await new Promise((r) => server.close(r)); await db.close(); },
   };
 }
 
 function serveStatic(pathname, res) {
-  const file = path.normalize(path.join(UI_ROOT, pathname === '/' ? 'index.html' : pathname));
+  const file = path.normalize(path.join(UI_ROOT, pathname.endsWith('/') ? `${pathname}index.html` : pathname));
   if (!file.startsWith(UI_ROOT)) { res.writeHead(403); return res.end(); }
   fs.readFile(file, (err, buf) => {
     if (err) { res.writeHead(404); return res.end('Not found'); }
@@ -586,36 +631,6 @@ function requireRole(user, roles) {
 
 function pick(obj, keys) {
   return Object.fromEntries(keys.filter((k) => obj[k] !== undefined).map((k) => [k, String(obj[k])]));
-}
-
-function cleanTrigger(body, creating) {
-  const out = {};
-  if (body.name !== undefined || creating) {
-    const name = String(body.name || '').trim();
-    if (!name || name.length > 60) throw httpError(400, 'Give the trigger a name (up to 60 characters)');
-    out.name = name;
-  }
-  if (body.bot_id !== undefined || creating) {
-    if (!body.bot_id) throw httpError(400, 'Pick which bot handles it');
-    out.bot_id = String(body.bot_id);
-  }
-  if (body.instructions !== undefined) out.instructions = String(body.instructions).slice(0, 4000);
-  if (body.enabled !== undefined) out.enabled = !!body.enabled;
-  if (body.max_per_hour !== undefined) {
-    const n = Number(body.max_per_hour);
-    if (!(Number.isInteger(n) && n >= 1 && n <= 500)) throw httpError(400, 'Max per hour must be 1–500');
-    out.max_per_hour = n;
-  }
-  if (creating) out.kind = body.kind;
-  if (body.schedule !== undefined) {
-    const s = body.schedule || {};
-    out.schedule = { freq: s.freq, ...(s.time ? { time: String(s.time) } : {}), ...(s.minute !== undefined ? { minute: String(s.minute).padStart(2, '0') } : {}), ...(s.day ? { day: Number(s.day) } : {}) };
-  }
-  if (body.app_event !== undefined && creating) {
-    const e = body.app_event || {};
-    out.app_event = { app: String(e.app || ''), slug: String(e.slug || ''), name: String(e.name || ''), config: e.config && typeof e.config === 'object' ? e.config : {} };
-  }
-  return out;
 }
 
 function cleanBot(body, creating) {

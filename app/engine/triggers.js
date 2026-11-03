@@ -65,6 +65,9 @@ function createTriggers({ db, store, runtime, composio }) {
   let subscribed = null; // Composio key we're subscribed with
   const seen = new Set(); // recent event ids, so redelivered events don't fire twice
 
+  // Bots set up recurring work too; then there's no person, and the audit names the bot.
+  const actor = (user, botId) => (user ? ['user', user.id] : ['bot', botId]);
+
   const timeZone = async () => (await store.getSetting('business', {})).timezone || process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   async function list() {
@@ -92,8 +95,8 @@ function createTriggers({ db, store, runtime, composio }) {
     await db.run(`INSERT INTO triggers (id, name, bot_id, kind, schedule, app_event, instructions, enabled, max_per_hour, last_slot, created_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [id, fields.name, fields.bot_id, fields.kind, fields.kind === 'schedule' ? JSON.stringify(fields.schedule) : null,
-      appEvent ? JSON.stringify(appEvent) : null, fields.instructions || '', fields.enabled !== false, fields.max_per_hour || 20, lastSlot, user.id]);
-    await store.audit('user', user.id, 'trigger.create', { id, kind: fields.kind });
+      appEvent ? JSON.stringify(appEvent) : null, fields.instructions || '', fields.enabled !== false, fields.max_per_hour || 20, lastSlot, user ? user.id : null]);
+    await store.audit(...actor(user, fields.bot_id), 'trigger.create', { id, kind: fields.kind });
     await ensureSubscribed();
     return changed(id);
   }
@@ -119,7 +122,7 @@ function createTriggers({ db, store, runtime, composio }) {
       if (t.kind === 'app') await composio.setTriggerEnabled(t.app_event.composio_trigger_id, !!fields.enabled).catch(() => {});
     }
     if (sets.length) { vals.push(id); await db.run(`UPDATE triggers SET ${sets.join(', ')} WHERE id=$${vals.length}`, vals); }
-    await store.audit('user', user.id, 'trigger.update', { id, fields: Object.keys(fields) });
+    await store.audit(...actor(user, t.bot_id), 'trigger.update', { id, fields: Object.keys(fields) });
     return changed(id);
   }
 
@@ -128,7 +131,7 @@ function createTriggers({ db, store, runtime, composio }) {
     if (!t) return;
     if (t.kind === 'app') await composio.deleteTrigger(t.app_event.composio_trigger_id).catch(() => {});
     await db.run('DELETE FROM triggers WHERE id=$1', [id]);
-    await store.audit('user', user.id, 'trigger.delete', { id });
+    await store.audit(...actor(user, t.bot_id), 'trigger.delete', { id });
     store.emit('trigger_deleted', { id });
   }
 
@@ -167,7 +170,7 @@ function createTriggers({ db, store, runtime, composio }) {
     const lastHour = await db.one("SELECT COUNT(*)::int AS n FROM trigger_events WHERE trigger_id=$1 AND outcome='handed to bot' AND created_at > now() - interval '1 hour'", [t.id]);
     if (lastHour.n >= t.max_per_hour) {
       if (lastHour.n === t.max_per_hour) {
-        await store.postFeed({ botId: t.bot_id, kind: 'trigger_limited', importance: 'important', summary: `Trigger "${t.name}" hit its limit of ${t.max_per_hour} an hour; extra events are skipped until it cools down` });
+        await store.postFeed({ botId: t.bot_id, kind: 'trigger_limited', importance: 'important', summary: `Recurring task "${t.name}" hit its limit of ${t.max_per_hour} an hour; extra events are skipped until it cools down` });
       }
       return log('skipped: hourly limit');
     }
@@ -240,10 +243,41 @@ function summarize(evt) {
   return [label, from && `from ${from}`, subject && `“${String(subject).slice(0, 80)}”`].filter(Boolean).join(' ');
 }
 
+// Checks and tidies trigger fields from the API or a bot.
+function cleanTrigger(body, creating) {
+  const out = {};
+  if (body.name !== undefined || creating) {
+    const name = String(body.name || '').trim();
+    if (!name || name.length > 60) throw httpError(400, 'Give the trigger a name (up to 60 characters)');
+    out.name = name;
+  }
+  if (body.bot_id !== undefined || creating) {
+    if (!body.bot_id) throw httpError(400, 'Pick which bot handles it');
+    out.bot_id = String(body.bot_id);
+  }
+  if (body.instructions !== undefined) out.instructions = String(body.instructions).slice(0, 4000);
+  if (body.enabled !== undefined) out.enabled = !!body.enabled;
+  if (body.max_per_hour !== undefined) {
+    const n = Number(body.max_per_hour);
+    if (!(Number.isInteger(n) && n >= 1 && n <= 500)) throw httpError(400, 'Max per hour must be 1–500');
+    out.max_per_hour = n;
+  }
+  if (creating) out.kind = body.kind;
+  if (body.schedule !== undefined) {
+    const s = body.schedule || {};
+    out.schedule = { freq: s.freq, ...(s.time ? { time: String(s.time) } : {}), ...(s.minute !== undefined ? { minute: String(s.minute).padStart(2, '0') } : {}), ...(s.day ? { day: Number(s.day) } : {}) };
+  }
+  if (body.app_event !== undefined && creating) {
+    const e = body.app_event || {};
+    out.app_event = { app: String(e.app || ''), slug: String(e.slug || ''), name: String(e.name || ''), config: e.config && typeof e.config === 'object' ? e.config : {} };
+  }
+  return out;
+}
+
 function httpError(status, message) {
   const err = new Error(message);
   err.status = status;
   return err;
 }
 
-module.exports = { createTriggers, dueSlot, describeSchedule, nextRunLabel, validSchedule, summarize };
+module.exports = { createTriggers, cleanTrigger, dueSlot, describeSchedule, nextRunLabel, validSchedule, summarize };

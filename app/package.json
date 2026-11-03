@@ -19,6 +19,7 @@
     "@electric-sql/pglite": "^0.5.14",
     "@honcho-ai/sdk": "^2.8.0",
     "pg": "^8.23.1",
+    "web-push": "^3.6.7",
     "ws": "^8.22.1"
   },
   "devDependencies": {

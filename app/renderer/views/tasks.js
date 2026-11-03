@@ -1,10 +1,11 @@
-// Tasks: board, list, "my approvals" and templates, plus the task detail panel.
+// Tasks: board, list, "my approvals", templates and recurring tasks, plus the task detail panel.
 // Bots move finished work to "Ready for review"; only a person marks a task done.
 import { api, uploadFile } from '../api.js';
 import { esc, timeAgo, statusChip, toast, modal, money, icon, STATUS, bytes } from '../ui.js';
 import { avatarSVG } from '../avatars.js';
 import { state, botById, taskById } from '../app.js';
 import { approvalCard, feedbackCard, bindCardActions } from './cards.js';
+import { recurringHTML, onRecurringClick, onRecurringToggle } from './recurring.js';
 
 const COLUMNS = ['approval_needed', 'awaiting_feedback', 'review', 'in_progress', 'queued', 'scheduled', 'done'];
 const CLOSED = ['done', 'failed', 'cancelled'];
@@ -23,11 +24,11 @@ async function loadTemplates() {
 export function render(main) {
   const visible = state.tasks.filter((t) => !botFilter || t.bot_id === botFilter);
   const mine = visible.filter((t) => t.status === 'approval_needed' && t.approval && (state.user.role === 'owner' || (t.approval.roles || []).includes(state.user.role)));
-  const tabs = [['board', 'Board'], ['list', 'List'], ['mine', `My approvals${mine.length ? ` <b class="badge badge-warning">${mine.length}</b>` : ''}`], ['templates', 'Templates']];
+  const tabs = [['board', 'Board'], ['list', 'List'], ['mine', `My approvals${mine.length ? ` <b class="badge badge-warning">${mine.length}</b>` : ''}`], ['templates', 'Templates'], ['recurring', 'Recurring']];
   main.innerHTML = `
     <section class="page">
       <header class="view-head">
-        <div><h1>Tasks</h1><p class="muted">${tab === 'templates' ? 'Reusable tasks: instructions, the right bot and any files it needs.' : 'Everything your bots are doing, and what needs you.'}</p></div>
+        <div><h1>Tasks</h1><p class="muted">${tab === 'templates' ? 'Reusable tasks: instructions, the right bot and any files it needs.' : tab === 'recurring' ? 'Work your bots repeat on their own, on a schedule or when something happens in an app.' : 'Everything your bots are doing, and what needs you.'}</p></div>
         <div class="head-actions">
           <div class="seg" role="tablist">
             ${tabs.map(([k, l]) => `<button role="tab" class="${tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}
@@ -39,20 +40,22 @@ export function render(main) {
         </div>
       </header>
       <div class="page-body" id="tasks-body">
-        ${tab === 'board' ? board(visible) : tab === 'list' ? list(visible) : tab === 'mine' ? list(mine, 'Nothing is waiting for your approval.') : templatesHTML()}
+        ${tab === 'board' ? board(visible) : tab === 'list' ? list(visible) : tab === 'mine' ? list(mine, 'Nothing is waiting for your approval.') : tab === 'templates' ? templatesHTML() : recurringHTML(botFilter)}
       </div>
     </section>`;
   main.querySelector('.seg').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) { tab = b.dataset.tab; render(main); } };
   main.querySelector('#bot-filter')?.addEventListener('change', (e) => { botFilter = e.target.value; render(main); });
   main.querySelector('#new-task')?.addEventListener('click', () => newTask());
   main.querySelector('#new-template')?.addEventListener('click', () => editTemplate(null));
-  main.querySelector('#tasks-body').onclick = onBodyClick;
+  main.querySelector('#tasks-body').onclick = async (e) => { if (tab === 'recurring' && await onRecurringClick(e)) return; onBodyClick(e); };
+  main.querySelector('#tasks-body').onchange = (e) => { if (tab === 'recurring') onRecurringToggle(e); };
   if (tab === 'templates' && !templates) loadTemplates().then(() => { if (tab === 'templates') render(main); }).catch((err) => toast(err.message, 'danger'));
 }
 
 export function onEvent({ type, data }) {
   if (type === 'template' || type === 'template_deleted') { templates = null; if (tab !== 'templates') return; }
-  if (['task', 'bot', 'bot_deleted', 'template', 'template_deleted'].includes(type)) render(document.getElementById('main'));
+  if (['trigger', 'trigger_deleted'].includes(type) && tab !== 'recurring') return;
+  if (['task', 'bot', 'bot_deleted', 'template', 'template_deleted', 'trigger', 'trigger_deleted'].includes(type)) render(document.getElementById('main'));
   if (detailModal && (type === 'task' && data.id === openId || type === 'artifact' || type === 'file')) refreshDetail();
 }
 

@@ -59,8 +59,14 @@ async function mockCreate({ messages }) {
   }
   if (prompt.startsWith('[Trigger]')) {
     const name = (prompt.match(/^\[Trigger\] "([^"]+)"/) || [])[1] || 'Trigger';
+    const todo = (prompt.match(/What to do: (.*)/) || [])[1] || '';
     if (stage === 0) return reply([call('create_task', { title: name, instructions: 'Started by a trigger' })], 'tool_use');
+    // Recurring work that writes to people drafts the email and waits for approval.
+    if (stage === 1 && /\b(email|e-mail|remind|reminder|follow ?up)\b/i.test(todo)) {
+      return reply([call('send_email', { task_id: taskId, to: 'accounts@acme.example', subject: 'Invoice reminder', body: 'Hi,\n\nA friendly reminder that invoice INV-1042 is now overdue. Could you let us know when to expect payment?\n\nThanks,\nMaya' })], 'tool_use');
+    }
     if (stage === 1) return reply([call('update_task', { task_id: taskId, status: 'review', result: 'Handled (demo mode)' })], 'tool_use');
+    if ((results[results.length - 1] || {}).status === 'approval_needed') return reply([text(`I've drafted it. It's waiting for your approval on ${taskId}.`)]);
     return reply([text(`Handled "${name}". ${taskId} is ready for your review.`)]);
   }
   if (prompt.startsWith('[Task assigned]')) {

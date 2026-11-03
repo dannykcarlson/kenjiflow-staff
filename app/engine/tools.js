@@ -3,9 +3,22 @@
 const fs = require('fs');
 const path = require('path');
 const { needsApproval } = require('./policy');
+const { cleanTrigger } = require('./triggers');
 
 // Tools that only appear once their connector is set up.
-const NEEDS = { search_email: 'gmail', read_email: 'gmail', app_find_actions: 'apps', app_run_action: 'apps' };
+const NEEDS = { search_email: 'gmail', read_email: 'gmail', app_find_actions: 'apps', app_run_action: 'apps', find_app_events: 'apps' };
+
+const SCHEDULE = {
+  type: 'object',
+  description: 'When it runs, in the business\'s timezone',
+  properties: {
+    freq: { type: 'string', enum: ['hourly', 'daily', 'weekdays', 'weekly'] },
+    time: { type: 'string', description: '24-hour "HH:MM", for daily, weekdays and weekly' },
+    day: { type: 'integer', description: 'Weekly only: 1 = Monday … 7 = Sunday' },
+    minute: { type: 'string', description: 'Hourly only: minutes past the hour, "00"–"59"' },
+  },
+  required: ['freq'],
+};
 
 const DEFS = [
   {
@@ -22,6 +35,61 @@ const DEFS = [
       },
       required: ['title'],
     },
+  },
+  {
+    name: 'set_up_recurring',
+    tag: 'internal',
+    description: 'Make work repeat on its own as a recurring task. Use it when the person wants something done regularly ("every Monday", "each morning", "weekly") or whenever something happens in a connected app ("when a new lead emails", "each time a deal closes"). If a request is clearly routine, offer to make it recurring. Give either a schedule or an app_event. Each run hands you the instructions and you create a task as usual. Check list_recurring first so you don\'t set up the same thing twice.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Short name, e.g. "Monday pipeline report" (up to 60 characters)' },
+        instructions: { type: 'string', description: 'What to do on each run, written so it makes sense on its own weeks from now' },
+        schedule: SCHEDULE,
+        app_event: {
+          type: 'object',
+          description: 'Run when something happens in a connected app. Call find_app_events first and use its exact event slug.',
+          properties: { app: { type: 'string', description: 'App slug, e.g. "gmail"' }, event: { type: 'string' }, config: { type: 'object' } },
+          required: ['app', 'event'],
+        },
+        bot_id: { type: 'string', description: 'The bot that should do it; leave out for yourself' },
+      },
+      required: ['name', 'instructions'],
+    },
+  },
+  {
+    name: 'find_app_events',
+    tag: 'read',
+    description: 'List the events a connected app can start recurring work on (e.g. a new Gmail message), with any settings each needs.',
+    input_schema: { type: 'object', properties: { app: { type: 'string', description: 'App slug, e.g. "gmail" or "hubspot"' } }, required: ['app'] },
+  },
+  {
+    name: 'list_recurring',
+    tag: 'read',
+    description: 'List the business\'s recurring tasks: what runs, when, which bot, and whether it\'s on.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'change_recurring',
+    tag: 'internal',
+    description: 'Change a recurring task when the person asks: rename it, change its instructions or schedule, or pause (on: false) and resume it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        recurring_id: { type: 'string' },
+        name: { type: 'string' },
+        instructions: { type: 'string' },
+        schedule: SCHEDULE,
+        on: { type: 'boolean' },
+      },
+      required: ['recurring_id'],
+    },
+  },
+  {
+    name: 'remove_recurring',
+    tag: 'internal',
+    description: 'Stop and delete a recurring task when the person asks. Tasks it already created stay.',
+    input_schema: { type: 'object', properties: { recurring_id: { type: 'string' } }, required: ['recurring_id'] },
   },
   {
     name: 'update_task',
@@ -333,6 +401,52 @@ async function runTool(name, input, ctx) {
     case 'post_update': {
       const item = await store.postFeed({ botId: bot.id, taskId: input.task_id || ctx.taskId, kind: 'update', importance: input.importance || 'info', summary: input.summary });
       return { result: { feed_id: item.id }, cards: [] };
+    }
+    case 'set_up_recurring': {
+      if (!input.schedule === !input.app_event) throw toolError('Give either a schedule or an app_event, not both.');
+      const botId = input.bot_id || bot.id;
+      if (!(await store.getBot(botId))) throw toolError(`No bot ${botId}.`);
+      const ev = input.app_event;
+      if (ev) {
+        if (ctx.connected && !ctx.connected.apps) return { error: NOT_CONNECTED.apps };
+        const types = await ctx.composio.listTriggerTypes(String(ev.app || '').toLowerCase());
+        const type = types.find((x) => x.slug === ev.event);
+        if (!type) throw toolError(`${ev.app} has no event ${ev.event}. Call find_app_events and use an exact slug.`);
+        ev.name = type.name;
+      }
+      const fields = cleanTrigger({
+        name: input.name, bot_id: botId, instructions: input.instructions, kind: ev ? 'app' : 'schedule',
+        ...(input.schedule ? { schedule: input.schedule } : {}),
+        ...(ev ? { app_event: { app: String(ev.app).toLowerCase(), slug: ev.event, name: ev.name, config: ev.config } } : {}),
+      }, true);
+      const t = await ctx.triggers.create(fields, null);
+      await store.postFeed({ botId: bot.id, kind: 'recurring', importance: 'info', summary: `New recurring task: ${t.name} (${t.when})` });
+      return { result: { recurring_id: t.id, when: t.when, next_run: t.next_run, note: 'Tell the person what will happen and when; they can pause or remove it under Tasks > Recurring.' }, cards: [] };
+    }
+    case 'find_app_events': {
+      const types = await ctx.composio.listTriggerTypes(String(input.app).toLowerCase());
+      return { result: { events: types.map((x) => ({ event: x.slug, name: x.name, description: String(x.description || '').slice(0, 300), config: x.config })) }, cards: [] };
+    }
+    case 'list_recurring': {
+      const rows = await ctx.triggers.list();
+      return { result: { recurring: rows.map((t) => ({ id: t.id, name: t.name, bot_id: t.bot_id, when: t.when, on: t.enabled, next_run: t.next_run, instructions: t.instructions })) }, cards: [] };
+    }
+    case 'change_recurring': {
+      const fields = cleanTrigger({
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
+        ...(input.schedule !== undefined ? { schedule: input.schedule } : {}),
+        ...(input.on !== undefined ? { enabled: input.on === true || input.on === 'true' } : {}),
+      }, false);
+      const t = await ctx.triggers.update(input.recurring_id, fields, null);
+      return { result: { recurring_id: t.id, when: t.when, on: t.enabled, next_run: t.next_run }, cards: [] };
+    }
+    case 'remove_recurring': {
+      const t = await ctx.triggers.get(input.recurring_id);
+      if (!t) throw toolError(`No recurring task ${input.recurring_id}.`);
+      await ctx.triggers.remove(t.id, null);
+      await store.postFeed({ botId: bot.id, kind: 'recurring', importance: 'info', summary: `Stopped recurring task: ${t.name}` });
+      return { result: { removed: t.id }, cards: [] };
     }
     default:
       return { error: `Unknown tool ${name}` };

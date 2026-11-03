@@ -41,8 +41,17 @@ export async function openSettings() {
           <button class="btn" type="submit">Add</button>
         </form>` : ''}
       </section>` : ''}
+      <section>
+        <h3>Approve from your phone</h3>
+        ${phoneHTML()}
+      </section>
+      ${['owner', 'admin'].includes(role) ? `<section>
+        <h3>Activity log</h3>
+        <div class="setting-row"><div><p class="muted">Every sign-in, approval, setting change and bot action outside the app, with who did it and when.</p></div><button class="btn" data-audit>Open activity log</button></div>
+      </section>` : ''}
       <section><button class="btn btn-ghost" data-signout>Sign out</button></section>
     </div>`, { wide: true });
+  m.el.querySelector('[data-audit]')?.addEventListener('click', () => openAudit());
 
   m.el.querySelector('[data-close]').onclick = m.close;
   m.el.querySelector('[data-signout]').onclick = () => { m.close(); signOut(); };
@@ -79,6 +88,42 @@ export async function openSettings() {
 }
 
 // ---------- integrations ----------
+// The phone page lives on the engine at /m. It only works from a phone when the engine
+// is the company server (https), not an engine running on this PC.
+function phoneHTML() {
+  const base = (window.kf && window.kf.engineUrl) || location.origin;
+  const local = /^http:\/\/(localhost|127\.0\.0\.1)/.test(base);
+  return local
+    ? '<p class="muted">Bots are running on this computer, so phones can\'t reach them. Once the business has its company server, open its address plus <span class="mono">/m</span> on your phone to approve work and get notifications, even with every PC off.</p>'
+    : `<p class="muted">On your phone, open <a class="link mono" href="${esc(base)}/m/" target="_blank" rel="noopener">${esc(base.replace(/^https?:\/\//, ''))}/m</a>, sign in, and tap <strong>Get notified</strong>. On iPhone, add it to your Home Screen first.</p>`;
+}
+
+const AUDIT_LABELS = {
+  login: 'signed in', 'approval.approve': 'approved', 'approval.reject': 'rejected', 'email.send': 'sent an email', 'app.action': 'ran an app action',
+  'trigger.create': 'set up a recurring task', 'trigger.update': 'changed a recurring task', 'trigger.delete': 'removed a recurring task',
+  'push.subscribe': 'turned on phone notifications', 'task.note': 'added a task note', 'bot.update': 'changed a bot', 'bot.create': 'added a bot', 'connector.app.connected': 'connected an app', 'connector.app.disconnect': 'disconnected an app',
+};
+
+async function openAudit() {
+  let rows = [];
+  const m = modal('<div class="modal-head"><h2>Activity log</h2><button class="icon-btn" data-close aria-label="Close">' + icon.x + '</button></div><div class="audit" id="audit-list"><p class="muted">Loading…</p></div><div class="modal-actions"><button class="btn" data-more style="display:none">Load older</button></div>', { wide: true });
+  m.el.querySelector('[data-close]').onclick = m.close;
+  const list = m.el.querySelector('#audit-list');
+  const more = m.el.querySelector('[data-more]');
+  const load = async () => {
+    const before = rows.length ? rows[rows.length - 1].created_at : '';
+    const page = await api('GET', `/api/audit?limit=100${before ? `&before=${encodeURIComponent(before)}` : ''}`);
+    rows = rows.concat(page);
+    list.innerHTML = rows.length ? rows.map((r) => {
+      const detail = Object.entries(r.detail || {}).filter(([, v]) => v !== '' && v !== null && typeof v !== 'object').map(([k, v]) => `${k}: ${v}`).join(' · ');
+      return `<div class="audit-row"><span class="mono muted">${new Date(r.created_at).toLocaleString()}</span><span><strong>${esc(r.actor_name || (r.actor_type === 'system' ? 'System' : r.actor_type))}</strong> ${esc(AUDIT_LABELS[r.action] || r.action)}</span><span class="muted small">${esc(detail)}</span></div>`;
+    }).join('') : '<p class="muted">Nothing logged yet.</p>';
+    more.style.display = page.length < 100 ? 'none' : '';
+  };
+  more.onclick = () => load().catch((err) => toast(err.message, 'danger'));
+  load().catch((err) => { list.innerHTML = `<p class="form-error">${esc(err.message)}</p>`; });
+}
+
 function integrationsHTML({ claude, gmail }, apps, billing, isAdmin) {
   const claudeStatus = claude.provider === 'mock'
     ? '<span class="chip chip-warning">Demo mode</span> No Claude key yet, so bots give scripted replies.'
@@ -181,9 +226,18 @@ function bindIntegrations(m) {
     if (!b) return;
     try {
       if (b.dataset.appConnect) {
-        const { url } = await api('POST', `/api/apps/${b.dataset.appConnect}/connect`);
-        window.open(url, '_blank', 'noopener'); // desktop app: opens in the real browser
-        toast("Sign in to the app in your browser. This updates when it's done.");
+        if (b.disabled) return;
+        const label = b.textContent;
+        b.disabled = true;
+        b.innerHTML = '<span class="spinner" aria-hidden="true"></span>Opening…';
+        try {
+          const { url } = await api('POST', `/api/apps/${b.dataset.appConnect}/connect`);
+          window.open(url, '_blank', 'noopener'); // desktop app: opens in the real browser
+          toast("Sign in to the app in your browser. This updates when it's done.");
+        } finally {
+          b.disabled = false;
+          b.textContent = label;
+        }
       } else if (b.dataset.appDisconnect) {
         if (!window.confirm("Disconnect this app? Bots stop using it until it's connected again.")) return;
         await api('DELETE', `/api/apps/${b.dataset.appDisconnect}`);

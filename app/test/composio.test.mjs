@@ -23,10 +23,14 @@ function fakeComposio(key) {
       list: async ({ userIds } = {}) => ({ items: fake.accounts.filter((a) => !userIds || userIds.includes(a.userId)) }),
       waitForConnection: async () => new Promise(() => {}),
       delete: async (id) => { fake.accounts = fake.accounts.filter((a) => a.id !== id); },
-      link: async (userId, authConfigId) => {
-        const toolkit = authConfigId.replace(/^ac_/, '');
-        fake.accounts.push({ id: `ca_${toolkit}`, userId, toolkit: { slug: toolkit }, status: 'ACTIVE', createdAt: new Date().toISOString() });
-        return { id: `ca_${toolkit}`, redirectUrl: `https://connect.composio.test/${toolkit}` };
+    },
+    client: {
+      link: {
+        create: async ({ auth_config_id: authConfigId, user_id: userId }) => {
+          const toolkit = authConfigId.replace(/^ac_/, '');
+          fake.accounts.push({ id: `ca_${toolkit}`, userId, toolkit: { slug: toolkit }, status: 'ACTIVE', createdAt: new Date().toISOString() });
+          return { connected_account_id: `ca_${toolkit}`, redirect_url: `https://connect.composio.test/${toolkit}` };
+        },
       },
     },
     authConfigs: {

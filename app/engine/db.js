@@ -178,6 +178,16 @@ CREATE TABLE IF NOT EXISTS settings (
 -- mark it), task notes and editable task templates. Safe to re-run on existing databases.
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
 ALTER TABLE app_actions ADD COLUMN IF NOT EXISTS log_id TEXT; -- Composio's log ID, for tracing a call in its dashboard
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL UNIQUE,
+  keys JSONB NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  last_ok_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS audit_log_created_at ON audit_log (created_at DESC);
 ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
 ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('queued','in_progress','approval_needed','awaiting_feedback','review','scheduled','done','failed','cancelled'));
 CREATE TABLE IF NOT EXISTS task_notes (

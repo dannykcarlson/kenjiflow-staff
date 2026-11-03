@@ -18,9 +18,11 @@ export function renderLogin(onSignedIn) {
         <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
         <p class="form-error" id="login-error" role="alert"></p>
         <button class="btn btn-primary btn-block" type="submit">Sign in</button>
+        <p class="muted small login-server" id="login-server" hidden></p>
       </form>
     </div>`;
   const form = document.getElementById('login-form');
+  if (window.kf && window.kf.server) showServer();
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
@@ -33,6 +35,25 @@ export function renderLogin(onSignedIn) {
     } catch (err) {
       document.getElementById('login-error').textContent = esc(err.message);
       btn.disabled = false;
+    }
+  });
+}
+
+// Desktop app only: which company server it talks to, and a way to change it.
+async function showServer() {
+  const el = document.getElementById('login-server');
+  const { url, local, fromEnv } = await window.kf.server();
+  el.hidden = false;
+  el.innerHTML = `Server: ${local ? 'this computer' : `<span class="mono">${esc(url.replace(/^https?:\/\//, ''))}</span>`}${fromEnv ? '' : ' · <button type="button" class="link" data-change-server>Change</button>'}`;
+  el.querySelector('[data-change-server]')?.addEventListener('click', async () => {
+    const next = window.prompt('Your company server address (https://…). Leave empty to run on this computer.', local ? '' : url);
+    if (next === null) return;
+    try {
+      el.textContent = 'Checking the server…';
+      await window.kf.setServer(next); // the app restarts on success
+    } catch (err) {
+      document.getElementById('login-error').textContent = err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+      showServer();
     }
   });
 }

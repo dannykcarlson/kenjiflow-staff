@@ -55,19 +55,35 @@ How it behaves:
 - **Billing:** every app action is counted. Settings shows the client a monthly meter. The team gets a feed alert at 80% and 100%, and KenjiFlow Admins see a per-month table to invoice overage from.
 - **Our cost:** Composio's Hobby plan is free up to 20,000 managed-app calls a month, across all clients combined. Pro is $29/month plus about $0.30 per 1,000 calls (check current pricing).
 
-## Triggers
+## Recurring tasks
 
-Triggers start a bot without anyone asking. Set them up on the **Triggers** screen (Owner, Manager or KenjiFlow Admin). There are quick starts for the B2B pack.
+Bots set up repeating work themselves. Ask in chat ("every Monday at 9, send me a pipeline summary", "whenever a new lead emails, draft a reply") and the bot creates a recurring task with `set_up_recurring`. When a one-off request is clearly routine, the bot offers to make it recurring. To change or stop one, ask the bot (`change_recurring`, `remove_recurring`).
 
-- **Schedules:** every hour, every day, weekdays or once a week, at a time in the business's timezone (`timezone` in the business profile, otherwise the server's). One run per slot. A run missed while the engine was down catches up once, when it restarts.
-- **App events:** for example a new Gmail message or a new HubSpot deal. The event list comes from the connected app (Composio). Events arrive over Composio's realtime stream, so the engine needs no public URL.
-- **When one fires:** the bot gets the event data, marked as data and not instructions, plus the trigger's instructions. It decides what to do, creating tasks as usual. Those tasks show source `schedule` or `trigger` and "created by bot".
+People see them under **Tasks > Recurring**: pause, run once, history and delete.
+
+- **Schedules:** every hour, every day, weekdays or once a week, at a time in the business's timezone (`timezone` in the business profile, otherwise the server's `TZ`). One run per slot. A run missed while the engine was down catches up once, when it restarts.
+- **App events:** for example a new Gmail message or a new HubSpot deal. The bot looks up an app's events with `find_app_events`. Events arrive over Composio's realtime stream, so the engine needs no public URL.
+- **Each run:** the bot gets the event data, marked as data and not instructions, plus the recurring task's instructions. It creates a task as usual, with source `schedule` or `trigger` and "created by bot".
 - **Safety:**
-  - Events are de-duplicated, and each trigger has a max-runs-per-hour limit (default 20).
-  - The team gets a feed alert when a trigger hits its limit.
-  - Turned-off triggers and the kill switch skip events.
+  - Events are de-duplicated, and each recurring task runs at most 20 times an hour. The team gets a feed alert when one hits that.
+  - Paused ones and the kill switch skip runs.
   - Approvals and test mode apply as normal.
-- **Testing and history:** "Run now" fires a trigger by hand, and "History" shows each event and what happened to it.
+
+## Company server (always on)
+
+For a real client the engine runs on a small cloud server the client owns, so bots, recurring tasks and approvals keep working with every PC off. Any VPS with 2 GB RAM works (e.g. Hetzner or DigitalOcean, about $10-25/month). The files are in `deploy/`.
+
+1. Create the server (Ubuntu), install Docker, and point a domain such as `staff.clientname.com` at its IP.
+2. Copy this `app` folder to the server. In `deploy/`, copy `.env.example` to `.env` and fill it in: the domain, the Owner login, a database password, `KF_SECRET_KEY` (keep a copy somewhere safe) and `TZ`.
+3. In `deploy/`, run `docker compose up -d --build`. Caddy gets the HTTPS certificate on its own. Check that `https://<domain>/api/health` answers.
+4. On each PC, in the Windows app's sign-in screen, click **Change** next to "Server" and enter `https://<domain>`. The app restarts against the server. The full app also works in a browser at the same address.
+5. Each person opens `https://<domain>/m` on their phone, signs in and taps **Get notified**. On iPhone, add it to the Home Screen first. Approval requests and bot questions then arrive as notifications and can be handled from the phone.
+
+Server safety:
+- With `NODE_ENV=production` (set in the image), the engine refuses to start without `KF_OWNER_EMAIL` and a 12+ character `KF_OWNER_PASSWORD`.
+- Ten wrong passwords from one address block sign-in from it for 15 minutes.
+- Owners and KenjiFlow Admins can read every sign-in, approval, setting change and outside action in **Settings > Activity log**.
+- `GET /api/health` is public, for uptime monitoring.
 
 ## Direct Gmail (advanced, once per client, about 15 minutes)
 
@@ -103,7 +119,9 @@ Once connected:
 | `DATABASE_URL` | Postgres on the client's server. Unset = local PGlite in `data/` |
 | `KF_DATA_DIR` | Where PGlite data and files live |
 | `PORT`, `HOST` | Engine address (default `127.0.0.1:4310`) |
-| `KF_ENGINE_URL` | Desktop app: connect to a remote engine instead of starting one |
+| `KF_ENGINE_URL` | Desktop app: connect to a remote engine instead of starting one (overrides the server set on the sign-in screen) |
+| `KF_TRUST_PROXY` | `1` behind the HTTPS proxy, so sign-in limits use the caller's address (set in the image) |
+| `KF_PUSH_CONTACT` | Contact sent to push services, `mailto:` or `https:` (default: `KF_PUBLIC_URL`) |
 | `KF_OWNER_EMAIL`, `KF_OWNER_PASSWORD`, `KF_OWNER_NAME`, `KF_BUSINESS_NAME` | First-run owner account for a real client install |
 | `KF_WHISPER_BIN`, `KF_WHISPER_MODEL` | Dictation: whisper.cpp binary and model (or drop them in `<userData>/whisper/`) |
 
@@ -111,5 +129,6 @@ Once connected:
 
 - Composio webhooks as an alternative to the realtime stream, for servers with a public URL.
 - Pushing each client's monthly usage to a central KenjiFlow billing dashboard (today: read it per client in Settings or in Composio's per-project usage).
-- Scheduler for recurring tasks, Windows installer signing + auto-update, Docker image for the client server.
+- Windows installer signing + auto-update.
+- Unanswered approvals expiring into the next morning brief; "Always allow" on approval cards.
 - Learn-from-edits memory beyond passing the edit back to the bot in chat.
