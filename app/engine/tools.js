@@ -92,6 +92,22 @@ const DEFS = [
     input_schema: { type: 'object', properties: { recurring_id: { type: 'string' } }, required: ['recurring_id'] },
   },
   {
+    name: 'start_big_job',
+    tag: 'internal',
+    description: 'Hand heavy work to a cloud sandbox that can run code and work with files: analysing a big export, building a report, spreadsheet, Word or PowerPoint file. Use it when the work is too big for chat, after create_task. It runs in the background and has a spend limit; you get a [Big job finished] message with its summary and files. The sandbox has no logins and can\'t send anything, so anything that must go out still goes through your own tools. Write the instructions so they stand alone: the sandbox can\'t see this chat and can\'t ask questions.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string' },
+        title: { type: 'string', description: 'Short name, e.g. "Q3 revenue analysis"' },
+        instructions: { type: 'string', description: 'Everything the job needs to know, and what files to produce' },
+        file_ids: { type: 'array', items: { type: 'string' }, description: 'Files to hand to the job' },
+        web: { type: 'boolean', description: 'True only if the job must search or read the web. The Owner has to allow this.' },
+      },
+      required: ['task_id', 'title', 'instructions'],
+    },
+  },
+  {
     name: 'update_task',
     tag: 'internal',
     description: 'Log progress on a task. When you believe the work is finished, set status "review" with a short result: a person checks it and marks it done. You can never mark a task done yourself. Use "failed" with the reason if you can\'t finish.',
@@ -401,6 +417,16 @@ async function runTool(name, input, ctx) {
     case 'post_update': {
       const item = await store.postFeed({ botId: bot.id, taskId: input.task_id || ctx.taskId, kind: 'update', importance: input.importance || 'info', summary: input.summary });
       return { result: { feed_id: item.id }, cards: [] };
+    }
+    case 'start_big_job': {
+      const task = await taskFor(input.task_id);
+      const payload = { title: input.title.slice(0, 120), instructions: input.instructions, file_ids: Array.isArray(input.file_ids) ? input.file_ids : [], web: input.web === true || input.web === 'true' };
+      if (needsApproval('write', bot.autonomy)) {
+        await store.requestApproval(task.id, { action: 'big_job', summary: `Run a big job: ${payload.title}`, payload });
+        return { result: { task_id: task.id, status: 'approval_needed', note: 'Queued for human approval. Do not start it again; you will be told the outcome.' }, cards: [{ type: 'approval', task_id: task.id }] };
+      }
+      const { job_id: jobId } = await ctx.connectors.execute('big_job', payload, { bot, task });
+      return { result: { job_id: jobId, task_id: task.id, status: 'running', note: 'Running in the background. Tell the person, then stop; a [Big job finished] message will bring you the result.' }, cards: [{ type: 'task', task_id: task.id }] };
     }
     case 'set_up_recurring': {
       if (!input.schedule === !input.app_event) throw toolError('Give either a schedule or an app_event, not both.');

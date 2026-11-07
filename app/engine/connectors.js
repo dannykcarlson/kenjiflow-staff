@@ -3,6 +3,8 @@
 // changes the outside world runs: it's logged instead. Reads always run.
 
 function createConnectors({ store, gmail, composio }) {
+  let bigJobs = null; // set by attachBigJobs: big jobs are built after the runtime, since they call it
+
   async function logInstead(task, bot, what, why) {
     if (task) await store.addStep(task.id, `${what}: recorded, not done (${why})`, 'bot');
     await store.postFeed({ botId: bot.id, taskId: task ? task.id : null, kind: 'action_logged', importance: 'info', summary: `${what} logged (${why})` });
@@ -44,10 +46,17 @@ function createConnectors({ store, gmail, composio }) {
       }
       return risk === 'read' ? data : { done: true, data };
     }
+    // Runs in test mode too: a big job only makes files, it can't reach the outside world.
+    if (action === 'big_job') {
+      const job = await bigJobs.start({ bot, task, title: payload.title, instructions: payload.instructions, fileIds: payload.file_ids, web: payload.web });
+      return { done: true, job_id: job.id };
+    }
     throw new Error(`No connector for ${action}`);
   }
 
-  return { execute };
+  function attachBigJobs(b) { bigJobs = b; }
+
+  return { execute, attachBigJobs };
 }
 
 module.exports = { createConnectors };

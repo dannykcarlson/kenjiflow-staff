@@ -85,10 +85,10 @@ test('a schedule fires once per slot and the bot creates a task', async () => {
   const trg = await api('POST', '/api/triggers', { name: 'Chase overdue invoices', bot_id: finance.id, kind: 'schedule', schedule: { freq: 'weekly', day: 5, time: '15:00' }, instructions: 'Chase anything 7+ days overdue' });
   assert.equal(trg.when, 'Fridays at 15:00');
 
-  // Pretend it's Friday 15:01 UTC: fires once, a second tick in the same slot does nothing.
+  // Pretend it's a future Friday, 15:01 UTC: fires once, a second tick in the same slot does nothing.
   await engine.store.setSetting('business', { ...(await engine.store.getSetting('business', {})), timezone: 'UTC' });
-  await engine.triggers.tick(new Date('2026-11-06T15:01:00Z'));
-  await engine.triggers.tick(new Date('2026-11-06T15:20:00Z'));
+  await engine.triggers.tick(new Date('2031-01-03T15:01:00Z'));
+  await engine.triggers.tick(new Date('2031-01-03T15:20:00Z'));
   const task = await until(async () => (await api('GET', '/api/tasks')).find((t) => t.title === 'Chase overdue invoices' && t.status === 'review'));
   assert.equal(task.source, 'schedule');
   assert.equal(task.created_by_type, 'bot');

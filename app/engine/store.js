@@ -165,6 +165,7 @@ function createStore(db, { filesDir }) {
     task.files = (await db.all('SELECT * FROM files WHERE task_id=$1 AND deleted_at IS NULL ORDER BY created_at', [id])).map(shapeFile);
     task.notes = await db.all(`SELECT n.id, n.text, n.user_id, n.created_at, u.name AS user_name FROM task_notes n
       LEFT JOIN users u ON u.id = n.user_id WHERE n.task_id=$1 ORDER BY n.created_at`, [id]);
+    task.big_jobs = await db.all('SELECT id, title, web, status, budget_usd, cost_usd, summary, error, created_at, finished_at FROM big_jobs WHERE task_id=$1 ORDER BY created_at', [id]);
     return task;
   }
   async function addNote(taskId, user, text) {

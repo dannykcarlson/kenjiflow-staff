@@ -83,7 +83,7 @@ test('a recurring task runs on the server, asks for approval and reaches the rig
   const finance = bots.find((b) => b.name === 'Finance'); // asks before every send
   const trg = await api('POST', '/api/triggers', { name: 'Overdue reminders', bot_id: finance.id, kind: 'schedule', schedule: { freq: 'daily', time: '09:00' }, instructions: 'Email a reminder for each overdue invoice' }, owner);
   await engine.store.setSetting('business', { ...(await engine.store.getSetting('business', {})), timezone: 'UTC' });
-  await engine.triggers.tick(new Date('2026-11-04T09:01:00Z'));
+  await engine.triggers.tick(new Date('2031-01-03T09:01:00Z'));
 
   const task = await until(async () => (await api('GET', '/api/tasks', null, owner)).find((t) => t.title === 'Overdue reminders' && t.status === 'approval_needed'));
   const note = await until(() => pushed.find((p) => p.tag === task.id));

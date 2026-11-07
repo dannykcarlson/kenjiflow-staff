@@ -21,6 +21,7 @@ Demo logins are in `engine/seed.js`. With no `ANTHROPIC_API_KEY` set, the engine
 | Data (Postgres via `DATABASE_URL`, else PGlite on disk) | `engine/db.js`, `engine/store.js` |
 | Bot loop (Claude tool use, one turn at a time per bot) | `engine/runtime.js`, `engine/llm.js` |
 | Bot tools + risk tags, approval policy | `engine/tools.js`, `engine/policy.js` |
+| Big jobs (Managed Agents sandboxes) | `engine/bigjobs.js` |
 | Outside actions (Gmail etc.; logged only in test mode) | `engine/connectors.js` |
 | Industry pack (bots, rules, task templates) | `engine/packs/b2b-services.json` |
 | Windows app shell, local dictation | `desktop/` |
@@ -68,6 +69,16 @@ People see them under **Tasks > Recurring**: pause, run once, history and delete
   - Events are de-duplicated, and each recurring task runs at most 20 times an hour. The team gets a feed alert when one hits that.
   - Paused ones and the kill switch skip runs.
   - Approvals and test mode apply as normal.
+
+## Big jobs
+
+Work too heavy for a chat turn (crunching an export, building a report, spreadsheet, Word or PowerPoint file) runs in an Anthropic Managed Agent. The bot calls `start_big_job`, the job runs in its own cloud sandbox, and the bot gets a `[Big job finished]` message with the summary. Output files land on the task.
+
+- **Cost:** on the client's own Claude bill, at normal token rates plus $0.08 per running hour and $10 per 1,000 web searches. Each job stops at a hard limit, $5 by default (**Settings > Safety**, $0.50 to $50). The cost shows on the task.
+- **Approvals:** the sandbox holds no logins, so it can only make files. Sending anything still goes through the bot's own tools. Bots on "Ask for everything" need approval to start a job.
+- **Web:** off by default. An Owner can allow it in **Settings > Safety**. Web jobs get open internet in their sandbox, because research sites can't be listed up front.
+- **Limits:** three jobs at once, an hour each. The kill switch, cancelling the task, and the Stop button on the task all stop a job and keep what it finished. Anything the sandbox pauses to ask about is refused, since nobody is watching.
+- **Restarts:** jobs are polled, so a restarted engine picks them up again. The agent and environment are created once per client on the first job, and again if the Claude key changes.
 
 ## Company server (always on)
 

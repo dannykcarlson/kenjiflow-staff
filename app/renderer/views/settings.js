@@ -20,7 +20,9 @@ export async function openSettings() {
       ${canPause ? `<section>
         <h3>Safety</h3>
         <div class="setting-row"><div><strong>Kill switch</strong><p class="muted">Pause every bot at once. They stop mid-task and wait.</p></div><button class="btn ${state.paused ? 'btn-primary' : 'btn-danger'}" data-pause>${icon.power} ${state.paused ? 'Resume all bots' : 'Pause all bots'}</button></div>
-        ${isOwner ? `<div class="setting-row"><div><strong>Test mode</strong><p class="muted">Bots draft but nothing leaves the business: approved emails are logged, not sent.</p></div><label class="switch"><input type="checkbox" data-test-mode ${state.testMode ? 'checked' : ''}><span></span></label></div>` : ''}
+        ${isOwner ? `<div class="setting-row"><div><strong>Test mode</strong><p class="muted">Bots draft but nothing leaves the business: approved emails are logged, not sent.</p></div><label class="switch"><input type="checkbox" data-test-mode ${state.testMode ? 'checked' : ''}><span></span></label></div>
+        <div class="setting-row"><div><strong>Big job spend limit</strong><p class="muted">Bots can hand heavy work to a cloud sandbox. Each job stops at this limit, on your Claude bill.</p></div><label class="money-input">$<input type="number" min="0.5" max="50" step="0.5" value="${Number(state.bigJobs?.budget_usd ?? 5)}" data-job-budget aria-label="Spend limit per big job in dollars"></label></div>
+        <div class="setting-row"><div><strong>Let big jobs use the web</strong><p class="muted">Lets jobs search and read websites. Their sandbox then has open internet, so a harmful web page could try to send a job's files elsewhere. Sandboxes never hold logins. Leave this off unless you need research.</p></div><label class="switch"><input type="checkbox" data-job-web ${state.bigJobs?.web ? 'checked' : ''}><span></span></label></div>` : ''}
       </section>` : ''}
       ${isOwner ? `<section>
         <h3>Business profile</h3>
@@ -68,6 +70,18 @@ export async function openSettings() {
     state.testMode = e.target.checked;
     toast(e.target.checked ? 'Test mode on: nothing will be sent' : 'Test mode off', 'neutral');
   });
+  m.el.querySelector('[data-job-web]')?.addEventListener('change', async (e) => {
+    try {
+      await api('PATCH', '/api/settings', { big_jobs: { web: e.target.checked } });
+      toast(e.target.checked ? 'Big jobs can use the web' : 'Big jobs stay off the web', 'neutral');
+    } catch (err) { e.target.checked = !e.target.checked; toast(err.message, 'danger'); }
+  });
+  m.el.querySelector('[data-job-budget]')?.addEventListener('change', async (e) => {
+    try {
+      await api('PATCH', '/api/settings', { big_jobs: { budget_usd: Number(e.target.value) } });
+      toast('Spend limit saved', 'success');
+    } catch (err) { e.target.value = state.bigJobs?.budget_usd ?? 5; toast(err.message, 'danger'); }
+  });
   m.el.querySelector('#biz-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const business = Object.fromEntries(new FormData(e.target));
@@ -99,7 +113,7 @@ function phoneHTML() {
 }
 
 const AUDIT_LABELS = {
-  login: 'signed in', 'approval.approve': 'approved', 'approval.reject': 'rejected', 'email.send': 'sent an email', 'app.action': 'ran an app action',
+  login: 'signed in', 'big_job.start': 'started a big job', 'big_job.finish': 'finished a big job', 'big_job.stop': 'stopped a big job', 'big_jobs.settings': 'changed big job settings', 'approval.approve': 'approved', 'approval.reject': 'rejected', 'email.send': 'sent an email', 'app.action': 'ran an app action',
   'trigger.create': 'set up a recurring task', 'trigger.update': 'changed a recurring task', 'trigger.delete': 'removed a recurring task',
   'push.subscribe': 'turned on phone notifications', 'task.note': 'added a task note', 'bot.update': 'changed a bot', 'bot.create': 'added a bot', 'connector.app.connected': 'connected an app', 'connector.app.disconnect': 'disconnected an app',
 };

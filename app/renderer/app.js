@@ -72,7 +72,7 @@ async function boot() {
 
 async function start() {
   const boot = await api('GET', '/api/bootstrap');
-  Object.assign(state, { user: boot.user, bots: boot.bots, business: boot.business, pack: boot.pack, testMode: boot.test_mode, paused: boot.paused, llm: boot.llm });
+  Object.assign(state, { user: boot.user, bots: boot.bots, business: boot.business, pack: boot.pack, testMode: boot.test_mode, paused: boot.paused, llm: boot.llm, bigJobs: boot.big_jobs });
   [state.tasks, state.feed, state.files, state.artifacts, state.triggers] = await Promise.all([
     api('GET', '/api/tasks'), api('GET', '/api/feed'), api('GET', '/api/files'), api('GET', '/api/artifacts'), api('GET', '/api/triggers'),
   ]);
@@ -112,6 +112,7 @@ async function onEvent({ type, data }) {
     case 'settings':
       if (data.key === 'paused') state.paused = data.value;
       if (data.key === 'test_mode') state.testMode = data.value;
+      if (data.key === 'big_jobs') state.bigJobs = data.value;
       if (data.key === 'llm') state.llm = data.value;
       onSettingsEvent(data);
       break;

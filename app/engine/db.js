@@ -188,6 +188,24 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS audit_log_created_at ON audit_log (created_at DESC);
+CREATE TABLE IF NOT EXISTS big_jobs (
+  id TEXT PRIMARY KEY,
+  task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  bot_id TEXT REFERENCES bots(id) ON DELETE SET NULL,
+  session_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  instructions TEXT NOT NULL,
+  web BOOLEAN NOT NULL DEFAULT false,
+  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','done','stopped','failed')),
+  budget_usd NUMERIC NOT NULL,
+  cost_usd NUMERIC NOT NULL DEFAULT 0,
+  summary TEXT,
+  error TEXT,
+  stop_reason TEXT,
+  denied JSONB NOT NULL DEFAULT '[]',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ
+);
 ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_status_check;
 ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('queued','in_progress','approval_needed','awaiting_feedback','review','scheduled','done','failed','cancelled'));
 CREATE TABLE IF NOT EXISTS task_notes (

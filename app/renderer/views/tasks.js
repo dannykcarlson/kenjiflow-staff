@@ -251,6 +251,20 @@ export async function openTask(id) {
 
 let editing = null; // 'title' | 'description' | 'reopen' while that field is open
 
+const JOB_STATUS = { running: ['Running', 'brand'], done: ['Finished', 'success'], stopped: ['Stopped', 'warning'], failed: ['Failed', 'danger'] };
+
+function bigJobCard(j) {
+  const [label, tone] = JOB_STATUS[j.status] || [j.status, 'neutral'];
+  const cost = j.status === 'running' ? `up to ${money(Number(j.budget_usd))}` : money(Number(j.cost_usd));
+  return `<div class="card big-job">
+    <div class="big-job-head"><span class="card-title">${esc(j.title)}</span><span class="chip chip-${tone}">${label}</span></div>
+    <div class="muted small">${cost}${j.web ? ' · used the web' : ''} · started ${timeAgo(j.created_at)}</div>
+    ${j.error ? `<div class="small">${esc(j.error)}</div>` : ''}
+    ${j.summary ? `<div class="pre-wrap small">${esc(j.summary)}</div>` : ''}
+    ${j.status === 'running' ? `<div class="row-actions"><button class="btn btn-sm" data-stop-job="${j.id}">Stop</button></div>` : ''}
+  </div>`;
+}
+
 async function refreshDetail() {
   if (!openId || !detailModal) return;
   let t;
@@ -291,6 +305,7 @@ async function refreshDetail() {
           ${t.artifacts.map((a) => `<button class="card card-artifact" data-open-artifact="${a.id}"><span class="card-icon">${icon.doc}</span><span class="card-title">${esc(a.title)}</span></button>`).join('')}
           ${t.files.map((f) => `<button class="card card-file" data-download="${f.id}"><span class="card-icon">${icon.file}</span><span class="card-title">${esc(f.name)}</span></button>`).join('')}
         </div>` : ''}
+        ${(t.big_jobs || []).length ? `<h3>Big jobs</h3>${t.big_jobs.map(bigJobCard).join('')}` : ''}
         <div class="notes">
           <h3>Notes</h3>
           ${t.notes.length ? `<ul class="note-list">${t.notes.map((n) => `<li><div class="note-meta"><strong>${esc(n.user_name || 'Someone')}</strong> <span class="muted small">${timeAgo(n.created_at)}</span></div><div class="pre-wrap">${esc(n.text)}</div></li>`).join('')}</ul>` : '<p class="muted small">No notes yet. Notes are for your team; the bot sees them when the task is sent back to it.</p>'}
@@ -359,6 +374,13 @@ function onDetailKey(e) {
 async function onDetailClick(e) {
   const edit = e.target.closest('[data-edit]');
   if (edit) return startEdit(edit.dataset.edit);
+  const stop = e.target.closest('[data-stop-job]');
+  if (stop) {
+    if (!window.confirm('Stop this big job? Anything it has finished so far is kept.')) return;
+    stop.disabled = true;
+    try { await api('POST', `/api/big-jobs/${stop.dataset.stopJob}/stop`); toast('Stopping the job'); } catch (err) { stop.disabled = false; toast(err.message, 'danger'); }
+    return;
+  }
   const b = e.target.closest('[data-close],[data-chat],[data-retry],[data-cancel-task],[data-mark-done],[data-reopen],[data-stop-edit]');
   if (!b) return;
   if (b.hasAttribute('data-close')) return detailModal?.close();

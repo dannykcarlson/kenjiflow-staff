@@ -57,6 +57,10 @@ async function mockCreate({ messages }) {
     if (stage === 0) return reply([call('update_task', { task_id: taskId, status: 'review', note: 'Got the answer, finishing up', result: 'Completed with your input' })], 'tool_use');
     return reply([text(`Thanks, that's what I needed. ${taskId} is ready for your review.`)]);
   }
+  if (prompt.startsWith('[Big job finished]')) {
+    if (stage === 0) return reply([call('update_task', { task_id: taskId, status: 'review', result: 'Big job finished (demo mode)' })], 'tool_use');
+    return reply([text(`The big job is finished. ${taskId} is ready for your review.`)]);
+  }
   if (prompt.startsWith('[Trigger]')) {
     const name = (prompt.match(/^\[Trigger\] "([^"]+)"/) || [])[1] || 'Trigger';
     const todo = (prompt.match(/What to do: (.*)/) || [])[1] || '';

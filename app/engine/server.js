@@ -16,6 +16,7 @@ const { createComposio } = require('./composio');
 const { createMemory } = require('./memory');
 const { createTriggers, cleanTrigger } = require('./triggers');
 const { createPush } = require('./push');
+const { createBigJobs } = require('./bigjobs');
 const { version: VERSION } = require('../package.json');
 
 // Engine settings can live in app/.env (ANTHROPIC_API_KEY=..., PORT=..., etc.).
@@ -27,7 +28,7 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 const ROLES = ['owner', 'manager', 'staff', 'admin'];
 
-async function start({ port = Number(process.env.PORT) || 4310, host = process.env.HOST || '127.0.0.1', dataDir, serveUi = false, llm, composioFactory, memoryClientFactory, pushSender } = {}) {
+async function start({ port = Number(process.env.PORT) || 4310, host = process.env.HOST || '127.0.0.1', dataDir, serveUi = false, llm, composioFactory, memoryClientFactory, pushSender, bigJobsFactory, bigJobsPollMs } = {}) {
   dataDir = dataDir || process.env.KF_DATA_DIR || path.join(__dirname, '..', 'data');
   const db = await openDb({ dataDir, databaseUrl: process.env.DATABASE_URL });
   const store = createStore(db, { filesDir: path.join(dataDir, 'files') });
@@ -46,6 +47,8 @@ async function start({ port = Number(process.env.PORT) || 4310, host = process.e
   const runtime = createRuntime({ store, llm, connectors, gmail, composio, memory });
   const triggers = createTriggers({ db, store, runtime, composio });
   runtime.attachTriggers(triggers);
+  const bigJobs = createBigJobs({ db, store, runtime, secrets, clientFactory: bigJobsFactory, model: llmOpts.model, pollMs: bigJobsPollMs });
+  connectors.attachBigJobs(bigJobs);
   const push = createPush({ db, store, secrets, sender: pushSender });
   push.start();
   const startedAt = Date.now();
@@ -90,6 +93,7 @@ async function start({ port = Number(process.env.PORT) || 4310, host = process.e
     pack: await store.getSetting('pack', null),
     test_mode: await store.getSetting('test_mode', true),
     paused: await store.getSetting('paused', false),
+    big_jobs: await bigJobs.settings(),
     llm: llmInfo(),
   }));
 
@@ -368,7 +372,7 @@ async function start({ port = Number(process.env.PORT) || 4310, host = process.e
       const bot = await store.getBot(task.bot_id);
       try {
         const res = await connectors.execute(approval.action, approval.payload, { bot, task: updated });
-        outcome = res.sent || res.done ? (approval.action === 'send_email' ? 'It was sent.' : 'It was done.') : `It was recorded but not done (${res.reason}).`;
+        outcome = res.sent || res.done ? (approval.action === 'send_email' ? 'It was sent.' : approval.action === 'big_job' ? 'The big job started; you will be told when it finishes.' : 'It was done.') : `It was recorded but not done (${res.reason}).`;
       } catch (err) {
         outcome = `It failed (${err.message}).`;
         await store.addStep(task.id, `Send failed: ${err.message}`, 'bot');
@@ -422,6 +426,15 @@ async function start({ port = Number(process.env.PORT) || 4310, host = process.e
   route('POST', '/api/triggers/:id/run', async ({ user, params }) => {
     requireRole(user, ['owner', 'manager', 'admin']);
     return { outcome: await triggers.runNow(params.id, user) };
+  });
+
+  // ---------- big jobs ----------
+  route('POST', '/api/big-jobs/:id/stop', async ({ user, params }) => {
+    const job = await bigJobs.get(params.id);
+    if (!job) throw httpError(404, 'Job not found');
+    await visibleTask(user, job.task_id);
+    await bigJobs.stop(job.id, `${user.name} stopped it`, user);
+    return { ok: true };
   });
 
   // ---------- phone notifications ----------
@@ -512,6 +525,17 @@ async function start({ port = Number(process.env.PORT) || 4310, host = process.e
     requireRole(user, ['owner']);
     if (body.test_mode !== undefined) await store.setSetting('test_mode', !!body.test_mode);
     if (body.business) await store.setSetting('business', pick(body.business, ['name', 'about', 'voice']));
+    if (body.big_jobs) {
+      const next = { ...(await bigJobs.settings()) };
+      if (body.big_jobs.web !== undefined) next.web = !!body.big_jobs.web;
+      if (body.big_jobs.budget_usd !== undefined) {
+        const n = Number(body.big_jobs.budget_usd);
+        if (!(n >= 0.5 && n <= 50)) throw httpError(400, 'The limit per job must be $0.50 to $50');
+        next.budget_usd = n;
+      }
+      await store.setSetting('big_jobs', next);
+      await store.audit('user', user.id, 'big_jobs.settings', { web: next.web, budget_usd: next.budget_usd });
+    }
     return { ok: true };
   });
 
@@ -576,13 +600,14 @@ async function start({ port = Number(process.env.PORT) || 4310, host = process.e
 
   await new Promise((resolve) => server.listen(port, host, resolve));
   triggers.start(); // schedules tick every 30s; app events stream from Composio
+  bigJobs.begin(); // also picks up jobs that were running before a restart
   const address = `http://${host}:${server.address().port}`;
   // Where Google sends people back to; set KF_PUBLIC_URL when the engine sits behind a domain.
   if (!publicUrl) publicUrl = `http://localhost:${server.address().port}`;
   console.log(`KenjiFlow Staff engine on ${address} (AI: ${llm.provider}${llm.provider === 'mock' ? ', demo mode' : `, ${llm.model}`}; memory: ${memory.enabled ? 'Honcho' : 'off'})`);
   return {
-    url: address, store, runtime, db, triggers, push,
-    async close() { triggers.stop(); wss.close(); await new Promise((r) => server.close(r)); await db.close(); },
+    url: address, store, runtime, db, triggers, push, bigJobs, connectors,
+    async close() { triggers.stop(); bigJobs.end(); wss.close(); await new Promise((r) => server.close(r)); await db.close(); },
   };
 }
 
