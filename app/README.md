@@ -1,6 +1,6 @@
 # KenjiFlow Staff (MVP)
 
-AI bots for small businesses: a Windows app plus an always-on engine. See `../SCOPE.md` for the full plan.
+AI bots for small businesses: a Windows app plus an always-on engine. See the [project README](../README.md) for an overview.
 
 ## Run it
 

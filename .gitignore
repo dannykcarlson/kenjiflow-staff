@@ -1,2 +1,10 @@
-# The Composio skill lives in .agents/skills; this is only a link to it.
-.claude/skills/
+# Private planning and research: kept on the PC, never published.
+SCOPE.md
+reports/
+research_notes/
+bot-icons/
+
+# Local AI tooling (the Composio skill and its link).
+.agents/
+.claude/
+skills-lock.json

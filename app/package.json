@@ -27,6 +27,7 @@
     "electron-builder": "^26.15.3"
   },
   "author": "KenjiFlow",
+  "license": "FSL-1.1-ALv2",
   "build": {
     "appId": "com.kenjiflow.staff",
     "productName": "KenjiFlow Staff",
